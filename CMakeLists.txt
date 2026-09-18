@@ -43,3 +43,30 @@ option(SFTE_WIN32_CONSOLE "Build as a console-subsystem executable (debugging ai
 if(MINGW AND NOT SFTE_WIN32_CONSOLE)
     target_link_options(sfte PRIVATE -mwindows -Wl,-e,mainCRTStartup)
 endif()
+
+option(SFTE_BUILD_BENCH "Build the headless font benchmark" OFF)
+
+if(SFTE_BUILD_BENCH)
+    add_executable(sfte_bench bench/bench_font.c)
+    target_compile_definitions(sfte_bench PRIVATE
+        _WIN32_WINNT=0x0A00
+        NTDDI_VERSION=0x0A000006
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    target_include_directories(sfte_bench PRIVATE "${CMAKE_SOURCE_DIR}")
+    target_compile_options(sfte_bench PRIVATE -O2 -Wall -Wextra)
+    target_link_libraries(sfte_bench PRIVATE user32 dwrite ole32)
+
+    add_executable(sfte_bench_stb bench/bench_font.c)
+    target_compile_definitions(sfte_bench_stb PRIVATE
+        _WIN32_WINNT=0x0A00
+        NTDDI_VERSION=0x0A000006
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        BENCH_STB
+    )
+    target_include_directories(sfte_bench_stb PRIVATE "${CMAKE_SOURCE_DIR}")
+    target_compile_options(sfte_bench_stb PRIVATE -O2 -Wall -Wextra -Wno-unused-function)
+    target_link_libraries(sfte_bench_stb PRIVATE user32)
+endif()

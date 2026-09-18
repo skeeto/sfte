@@ -126,6 +126,21 @@ There are still a couple of mandatory ones, which were hard to get rid of, hence
 - [`stb_truetype.h`](https://github.com/nothings/stb/blob/master/stb_truetype.h)
 - [`stb_image.h`](https://github.com/nothings/stb/blob/master/stb_image.h)
 
+## Benchmarks
+
+`bench/bench_font.c` is a headless benchmark for the render pass, the rune -> glyph id
+resolution and the font backends. It reports milliseconds per frame and backend lookup counts.
+
+```sh
+cmake -S . -B build -G Ninja -DSFTE_BUILD_BENCH=ON
+cmake --build build
+build/sfte_bench.exe 3000 0      # DirectWrite, idle grid
+build/sfte_bench_stb.exe 3000 1  # stb_truetype, one new line per frame
+```
+
+Mode `2` fills the grid with distinct runes and stresses the memo capacity
+(`SFTE_FONT_ID_CACHE_CAP`). Build instructions for a manual gcc invocation are in the file header.
+
 ## License
 
 zlib license.
