@@ -55,6 +55,14 @@
     There's a lot of customization options regarding fonts.
     50% of API calls with a default setup are also font-related.
 
+    The default rasterizer is stb_truetype. It can be replaced with a platform text stack
+    (e.g. DirectWrite on Windows, see sfte_dwrite.h) by defining SFTE_FONT_CUSTOM_BACKEND and the
+    6 macro hooks: SFTE_FONT_INIT, SFTE_FONT_GET_SCALE, SFTE_FONT_VMETRICS, SFTE_FONT_BOUNDS,
+    SFTE_FONT_BAKE and SFTE_FONT_GET_ID. Custom backends may additionally define:
+    - SFTE_FONT_INIT_SIZED(info, data, size) - receives the exact font size when known,
+    - SFTE_FONT_DEINIT(info) - releases backend resources on font cache teardown,
+    - SFTE_FONT_SUBPIXEL - bakes 3-channel (ClearType-style) coverage instead of 8-bit alpha.
+
     To set them up properly, first consider what font types you want to use.
     If you want to use a bold font,        add #define SFTE_FONT_BOLD.
     If you want to use an italic font,     add #define SFTE_FONT_ITALIC.
@@ -179,6 +187,7 @@ typedef struct sfte_font_backend_info sfte_font_backend_info;
 #endif  // !defined(SFTE_IMG_KITTY) || SFTE_IMG_KITTY
 
 #include <float.h>   // FLT_MAX
+#include <math.h>    // floorf
 #include <stddef.h>  // size_t
 #include <stdint.h>
 
@@ -598,6 +607,17 @@ _SFTE_ENSURE_RANGE(SFTE_COLOR_BG_OPACITY, 0x00, 0xFF);
          ((uint32_t *)(buf))[(y) * (stride) + (x)], (argb_color), (alpha)))
 #endif  // SFTE_COLOR_BLEND_PIXEL
 
+/*
+    A macro helper used to blend pixels with per-channel (subpixel) coverage.
+    Only used when SFTE_FONT_SUBPIXEL is enabled.
+    This can be overriden to support different color formats.
+*/
+#ifndef SFTE_COLOR_BLEND_PIXEL_SUBPIXEL
+#define SFTE_COLOR_BLEND_PIXEL_SUBPIXEL(buf, x, y, stride, argb_color, cov_r, cov_g, cov_b)        \
+    (((uint32_t *)(buf))[(y) * (stride) + (x)] = _sfte_render_blend_argb_subpixel(                 \
+         ((uint32_t *)(buf))[(y) * (stride) + (x)], (argb_color), (cov_r), (cov_g), (cov_b)))
+#endif  // SFTE_COLOR_BLEND_PIXEL_SUBPIXEL
+
 #define SFTE_COLOR_ALPHA_MASK 0xFF000000
 
 // =================================================================================================
@@ -623,6 +643,38 @@ static inline int _sfte_stb_get_id(sfte_font_backend_info *info, uint32_t rune);
 #endif  // !defined(SFTE_FONT_INIT) || !defined(SFTE_FONT_GET_SCALE) || !defined(SFTE_FONT_VMETRICS)
         // || !defined(SFTE_FONT_BOUNDS) || !defined(SFTE_FONT_BAKE) || !defined(SFTE_FONT_GET_ID)
 #endif  // SFTE_FONT_CUSTOM_BACKEND
+
+/*
+    Enables 3-channel (RGB) subpixel coverage in the font atlas, e.g. ClearType.
+    The font backend must bake 3 bytes per pixel: one coverage value per R, G and B.
+    This requires a custom font backend (SFTE_FONT_CUSTOM_BACKEND).
+*/
+#ifndef SFTE_FONT_SUBPIXEL
+#define SFTE_FONT_SUBPIXEL 0
+#endif  // SFTE_FONT_SUBPIXEL
+_SFTE_ENSURE_RANGE(SFTE_FONT_SUBPIXEL, 0, 1);
+
+#if SFTE_FONT_SUBPIXEL && !defined(SFTE_FONT_CUSTOM_BACKEND)
+#error "SFTE_FONT_SUBPIXEL requires a custom font backend (SFTE_FONT_CUSTOM_BACKEND)."
+#endif  // SFTE_FONT_SUBPIXEL && !defined(SFTE_FONT_CUSTOM_BACKEND)
+
+#if SFTE_FONT_SUBPIXEL
+#define _SFTE_FONT_ATLAS_BPP 3
+#else
+#define _SFTE_FONT_ATLAS_BPP 1
+#endif  // SFTE_FONT_SUBPIXEL
+
+/*
+    Optional custom backend hooks:
+    - SFTE_FONT_INIT_SIZED(info, data, size): preferred over SFTE_FONT_INIT when defined.
+      `size` is the exact font byte count for sfte_font_load_file, or 0 when unknown.
+    - SFTE_FONT_DEINIT(info): releases backend resources when the font cache is freed.
+*/
+#if defined(SFTE_FONT_DEINIT)
+#define SFTE_FONT_DEINIT_HOOK(info) SFTE_FONT_DEINIT(info)
+#else
+#define SFTE_FONT_DEINIT_HOOK(info) ((void)(info))
+#endif  // SFTE_FONT_DEINIT
 
 /*
     Minimum size of the font in pixels.
@@ -1981,6 +2033,7 @@ typedef struct {
 
     uint8_t owns_ttf_buf[SFTE_FONT_MAX_COUNT];  // 1 if sfte allocated it via fopen, 0 if user
                                                 // provided it
+    size_t ttf_size[SFTE_FONT_MAX_COUNT];       // 0 if unknown (e.g. sfte_font_load_mem)
     int8_t num_fonts;
 } sfte_font_cache;
 
@@ -7143,7 +7196,9 @@ static inline sfte_font_cache *_sfte_font_get_cache(sfte_ctx *ctx, sfte_font_sty
     Clears a font cache's atlas texture and glyph hash map.
 */
 static inline void _sfte_font_clear_cache(sfte_font_cache *cache) {
-    if (cache->atlas_pxs) memset(cache->atlas_pxs, 0, SFTE_FONT_ATLAS_SIZE * SFTE_FONT_ATLAS_SIZE);
+    if (cache->atlas_pxs)
+        memset(cache->atlas_pxs, 0,
+               SFTE_FONT_ATLAS_SIZE * SFTE_FONT_ATLAS_SIZE * _SFTE_FONT_ATLAS_BPP);
     if (cache->glyphs) memset(cache->glyphs, 0, SFTE_FONT_GLYPH_CAP * sizeof(sfte_glyph));
     cache->atlas_x = 0;
     cache->atlas_y = 0;
@@ -7187,7 +7242,8 @@ static inline void _sfte_font_pack_and_bake(sfte_ctx *ctx, sfte_font_cache *cach
     if (gw > 0 && gh > 0) {
         int32_t atlas_idx = g->y0 * SFTE_FONT_ATLAS_SIZE + g->x0;
         SFTE_FONT_BAKE(ctx, &cache->info[font_idx], glyph_id, cache->scales[font_idx],
-                       &cache->atlas_pxs[atlas_idx], gw, gh, SFTE_FONT_ATLAS_SIZE);
+                       &cache->atlas_pxs[atlas_idx * _SFTE_FONT_ATLAS_BPP], gw, gh,
+                       SFTE_FONT_ATLAS_SIZE);
     }
 
     cache->atlas_x += gw + _SFTE_FONT_PADDING;
@@ -7695,6 +7751,26 @@ static inline uint32_t _sfte_render_blend_argb(uint32_t dst, uint32_t src_col, u
 }
 
 /*
+    Same as `_sfte_render_blend_argb`, but with independent coverage per RGB channel.
+    Used for subpixel (ClearType-style) glyph coverage.
+*/
+static inline uint32_t _sfte_render_blend_argb_subpixel(uint32_t dst, uint32_t src_col,
+                                                        uint8_t cov_r, uint8_t cov_g,
+                                                        uint8_t cov_b) {
+    if ((cov_r | cov_g | cov_b) == 0) return dst;
+
+    uint8_t da = (dst >> 24) & 0xFF;
+    uint8_t dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF, db = dst & 0xFF;
+    uint8_t sr = (src_col >> 16) & 0xFF, sg = (src_col >> 8) & 0xFF, sb = src_col & 0xFF;
+
+    uint8_t out_r = (sr * cov_r + dr * (255 - cov_r)) >> 8;
+    uint8_t out_g = (sg * cov_g + dg * (255 - cov_g)) >> 8;
+    uint8_t out_b = (sb * cov_b + db * (255 - cov_b)) >> 8;
+
+    return (da << 24) | (out_r << 16) | (out_g << 8) | out_b;
+}
+
+/*
     Paints the solid background color for a terminal cell.
 */
 static inline void _sfte_render_bg_cell(sfte_ctx *ctx, void *px_buf, int16_t col, int16_t row,
@@ -7744,11 +7820,21 @@ static inline void _sfte_render_fg_cell(sfte_ctx *ctx, void *px_buf, int16_t col
             if (screen_x < 0 || screen_x >= ctx->width || screen_y < 0 || screen_y >= ctx->height)
                 continue;
 
+#if SFTE_FONT_SUBPIXEL
+            const uint8_t *cov = &target_cache
+                                      ->atlas_pxs[((g->y0 + y) * SFTE_FONT_ATLAS_SIZE +
+                                                   (g->x0 + x)) *
+                                                  3];
+
+            SFTE_COLOR_BLEND_PIXEL_SUBPIXEL(px_buf, screen_x, screen_y, ctx->width, fg, cov[0],
+                                            cov[1], cov[2]);
+#else
             uint8_t alpha = target_cache
                                 ->atlas_pxs[(g->y0 + y) * SFTE_FONT_ATLAS_SIZE + (g->x0 + x)] &
                             0xFF;
 
             SFTE_COLOR_BLEND_PIXEL(px_buf, screen_x, screen_y, ctx->width, fg, alpha);
+#endif  // SFTE_FONT_SUBPIXEL
         }
     }
 }
@@ -10101,8 +10187,10 @@ void sfte_free(sfte_ctx *ctx) {
 
 #define FREE_CACHE(type)                                                                           \
     do {                                                                                           \
-        for (int i = 0; i < type.num_fonts; ++i)                                                   \
+        for (int i = 0; i < type.num_fonts; ++i) {                                                 \
+            SFTE_FONT_DEINIT_HOOK(&type.info[i]);                                                  \
             if (type.owns_ttf_buf[i]) SFTE_FREE(type.ttf_buf[i]);                                  \
+        }                                                                                          \
         SFTE_FREE(type.atlas_pxs);                                                                 \
         SFTE_FREE(type.glyphs);                                                                    \
     } while (0)
@@ -10145,20 +10233,23 @@ void sfte_free(sfte_ctx *ctx) {
     SFTE_FREE(ctx);
 }
 
-void sfte_font_load_mem(sfte_ctx *ctx, sfte_font_style style, const uint8_t *ttf_data) {
+static inline void _sfte_font_load_mem_sized(sfte_ctx *ctx, sfte_font_style style,
+                                             const uint8_t *ttf_data, size_t ttf_size) {
     sfte_font_cache *cache = _sfte_font_get_cache(ctx, style);
     if (!cache || !ttf_data || cache->num_fonts >= SFTE_FONT_MAX_COUNT) return;
 
     uint8_t idx = cache->num_fonts++;
     cache->ttf_buf[idx] = (uint8_t *)ttf_data;
     cache->owns_ttf_buf[idx] = 0;
+    cache->ttf_size[idx] = ttf_size;
 
     if (idx == 0) {
         if (style == SFTE_FONT_STYLE_REGULAR && idx == 0)
             ctx->font.cur_size = SFTE_FONT_DEFAULT_SIZE;
 
         if (!cache->atlas_pxs) {
-            cache->atlas_pxs = (uint8_t *)SFTE_MALLOC(SFTE_FONT_ATLAS_SIZE * SFTE_FONT_ATLAS_SIZE);
+            cache->atlas_pxs = (uint8_t *)SFTE_MALLOC(SFTE_FONT_ATLAS_SIZE * SFTE_FONT_ATLAS_SIZE *
+                                                      _SFTE_FONT_ATLAS_BPP);
             SFTE_ASSERT(cache->atlas_pxs, "failed to allocate font atlas");
         }
 
@@ -10168,7 +10259,11 @@ void sfte_font_load_mem(sfte_ctx *ctx, sfte_font_style style, const uint8_t *ttf
         }
     }
 
+#if defined(SFTE_FONT_INIT_SIZED)
+    SFTE_FONT_INIT_SIZED(&cache->info[idx], cache->ttf_buf[idx], cache->ttf_size[idx]);
+#else
     SFTE_FONT_INIT(&cache->info[idx], cache->ttf_buf[idx]);
+#endif  // SFTE_FONT_INIT_SIZED
 
 #if SFTE_FONT_LIGATURES
     _sfte_shaper_init(&cache->shaper[idx], cache->ttf_buf[idx]);
@@ -10183,6 +10278,10 @@ void sfte_font_load_mem(sfte_ctx *ctx, sfte_font_style style, const uint8_t *ttf
     }
 
     _SFTE_INFO(ctx, FONT_LOADED);
+}
+
+void sfte_font_load_mem(sfte_ctx *ctx, sfte_font_style style, const uint8_t *ttf_data) {
+    _sfte_font_load_mem_sized(ctx, style, ttf_data, 0);
 }
 
 void sfte_font_load_file(sfte_ctx *ctx, sfte_font_style style, const char *path) {
@@ -10200,11 +10299,15 @@ void sfte_font_load_file(sfte_ctx *ctx, sfte_font_style style, const char *path)
     fseek(f, 0, SEEK_SET);
 
     uint8_t *buf = (uint8_t *)SFTE_MALLOC(size);
-    SFTE_ASSERT(fread(buf, 1, size, f) == size, "failed to read font file");
+    size_t read = fread(buf, 1, size, f);
+    SFTE_ASSERT(read == size, "failed to read font file");
     fclose(f);
 
-    sfte_font_load_mem(ctx, style, buf);
-    cache->owns_ttf_buf[cache->num_fonts - 1] = 1;
+    uint8_t before = cache->num_fonts;
+    _sfte_font_load_mem_sized(ctx, style, buf, size);
+
+    if (cache->num_fonts > before) cache->owns_ttf_buf[cache->num_fonts - 1] = 1;
+    else SFTE_FREE(buf);
 }
 
 #ifndef SFTE_NO_POSIX

@@ -35,7 +35,7 @@ else()
     target_compile_options(sfte PRIVATE -O2 -Wall -Wextra)
 endif()
 
-target_link_libraries(sfte PRIVATE user32 gdi32 shell32 ole32 dwmapi)
+target_link_libraries(sfte PRIVATE user32 gdi32 shell32 ole32 dwmapi dwrite)
 
 option(SFTE_WIN32_CONSOLE "Build as a console-subsystem executable (debugging aid)" OFF)
 

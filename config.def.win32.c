@@ -7,6 +7,14 @@
     To apply a change, just rebuild the project.
 */
 
+// DirectWrite font backend: glyphs are rasterized by the system text stack,
+// honoring the ClearType configuration (gamma, enhanced contrast, hinting).
+// Set SFTE_FONT_SUBPIXEL to 0 for grayscale coverage instead of ClearType.
+// Other knobs: SFTE_DWRITE_ANTIALIAS, SFTE_DWRITE_RENDERING_MODE, SFTE_DWRITE_SWAP_RB.
+#define SFTE_FONT_CUSTOM_BACKEND
+#define SFTE_FONT_SUBPIXEL 1
+#include "sfte_dwrite.h"
+
 // #define SFTE_COLOR_BG_OPACITY 0xEE
 // #define SFTE_CURSOR_TRAIL 10
 #define SFTE_FONT_BOLD

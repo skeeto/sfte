@@ -85,6 +85,18 @@ cmake --build build
 The shell is resolved in this order: `SFTE_SHELL`, `ash.exe`, `powershell.exe`, `COMSPEC`, `cmd.exe`.
 Override it from `config.c` with `sfte_win32_set_shell(app, "...")` or via the `SFTE_SHELL` environment variable.
 
+### Windows font rendering (DirectWrite)
+
+The default Windows config rasterizes glyphs with DirectWrite, so text honors the system
+ClearType configuration (antialiasing mode, gamma, enhanced contrast and hinting).
+
+- `SFTE_FONT_SUBPIXEL` (`1` by default) selects ClearType subpixel coverage; set it to `0` for grayscale.
+- `SFTE_DWRITE_ANTIALIAS`: `0` follows the system ClearType setting, `1` forces ClearType, `2` forces grayscale.
+- `SFTE_DWRITE_RENDERING_MODE`: `0` GDI classic (default), `1` GDI natural, `2` natural, `3` natural symmetric.
+- `SFTE_DWRITE_SWAP_RB`: `1` swaps the red/blue coverage channels.
+
+Remove the `SFTE_FONT_CUSTOM_BACKEND` block from `config.c` to fall back to the built-in `stb_truetype` rasterizer.
+
 ## Customization
 
 **sfte** relies heavily on customization.
