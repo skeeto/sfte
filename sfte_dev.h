@@ -9789,6 +9789,18 @@ static inline void _sfte_win32_apply_dark_title(HWND hwnd) {
         (void)DwmSetWindowAttribute(hwnd, 19, &dark, sizeof(dark));
 }
 
+/*
+    Cloaked windows are composed by DWM but not presented to the user. Keeping the
+    window cloaked until its first frame has been painted prevents DWM from ever
+    presenting an unpainted (white) window surface at startup.
+*/
+static inline uint8_t _sfte_win32_cloak(HWND hwnd, BOOL cloak) {
+#ifndef DWMWA_CLOAK
+#define DWMWA_CLOAK 13
+#endif  // DWMWA_CLOAK
+    return SUCCEEDED(DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak)));
+}
+
 static inline LRESULT CALLBACK _sfte_win32_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam,
                                                     LPARAM lparam) {
     sfte_win32_app *app = (sfte_win32_app *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
@@ -9802,7 +9814,15 @@ static inline LRESULT CALLBACK _sfte_win32_wnd_proc(HWND hwnd, UINT msg, WPARAM 
     if (!app) return DefWindowProcW(hwnd, msg, wparam, lparam);
 
     switch (msg) {
-    case WM_ERASEBKGND: return 1;
+    case WM_ERASEBKGND: {
+        // Paint the invalidated region with the terminal background. The backbuffer
+        // blit in WM_PAINT covers it again, but this guarantees the window surface is
+        // never left at the default (white) color, e.g. on the first show.
+        HDC dc = (HDC)wparam;
+        RECT rc;
+        if (GetUpdateRect(hwnd, &rc, FALSE)) FillRect(dc, &rc, app->bg_brush);
+        return 1;
+    }
 
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -11397,6 +11417,7 @@ int sfte_win32_run(sfte_win32_app *app) {
 
     _sfte_win32_apply_dark_title(hwnd);
     _sfte_win32_create_backbuffer(app);
+    uint8_t cloaked = _sfte_win32_cloak(hwnd, TRUE);
 
     _sfte_win32_pty_spawn(app);
     if (!app->hpc) {
@@ -11407,9 +11428,15 @@ int sfte_win32_run(sfte_win32_app *app) {
     }
     _sfte_win32_pty_update(app);
 
+    // Render the first frame while the window is still hidden, so the first
+    // composited frame is the terminal instead of the default window surface.
+    // The shell is already running, so input is accepted from this point on.
+    app->needs_render = 1;
+    _sfte_win32_render(app);
+
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
-    app->needs_render = 1;
+    if (cloaked) _sfte_win32_cloak(hwnd, FALSE);
 
     _sfte_win32_loop(app);
 
