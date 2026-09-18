@@ -809,6 +809,19 @@ _SFTE_ENSURE_RANGE(SFTE_FONT_ATLAS_SIZE, 1, INT32_MAX);
 _SFTE_ENSURE_RANGE(SFTE_FONT_GLYPH_CAP, 1, UINT16_MAX);
 
 /*
+    Capacity of the per-cache rune -> (font index, glyph id) memo table.
+    Prevents the backend lookup (e.g. DirectWrite) from running for every
+    visible cell on every frame. The table is small enough to stay in cache;
+    it should exceed the number of distinct runes on screen for a full hit
+    rate (raise it for very dense non-Latin screens). Must be a power of two.
+    0 disables the memo.
+*/
+#ifndef SFTE_FONT_ID_CACHE_CAP
+#define SFTE_FONT_ID_CACHE_CAP 4096
+#endif  // SFTE_FONT_ID_CACHE_CAP
+_SFTE_ENSURE_RANGE(SFTE_FONT_ID_CACHE_CAP, 0, INT32_MAX);
+
+/*
     Maximum amount of combining (width = 0) glyphs on one cell.
 */
 #ifndef SFTE_FONT_MAX_COMBINING
@@ -2013,6 +2026,19 @@ typedef struct {
 } sfte_shaper_subst_record;
 #endif  // SFTE_FONT_LIGATURES
 
+#if SFTE_FONT_ID_CACHE_CAP
+/*
+    A memoized rune -> (font index, glyph id) mapping.
+    `key` is `rune + 1`; 0 marks an empty slot.
+*/
+typedef struct {
+    uint32_t key;
+    uint16_t glyph_id;
+    uint8_t font_idx;
+    uint8_t pad;
+} sfte_font_id_entry;
+#endif  // SFTE_FONT_ID_CACHE_CAP
+
 /*
     Font variant texture cache.
 */
@@ -2024,6 +2050,9 @@ typedef struct {
     uint8_t *ttf_buf[SFTE_FONT_MAX_COUNT];
     uint8_t *atlas_pxs;
     sfte_glyph *glyphs;
+#if SFTE_FONT_ID_CACHE_CAP
+    sfte_font_id_entry id_cache[SFTE_FONT_ID_CACHE_CAP];
+#endif  // SFTE_FONT_ID_CACHE_CAP
 
     float scales[SFTE_FONT_MAX_COUNT];
 
@@ -2711,6 +2740,9 @@ static inline void _sfte_shaper_shape_row(sfte_shaper_ctx *ctx, const uint8_t *t
 #endif  // !SFTE_FONT_CUSTOM_BACKEND
 static inline sfte_font_cache *_sfte_font_get_cache(sfte_ctx *ctx, sfte_font_style style);
 static inline void _sfte_font_clear_cache(sfte_font_cache *cache);
+#if SFTE_FONT_ID_CACHE_CAP
+static inline void _sfte_font_id_cache_clear(sfte_font_cache *cache);
+#endif  // SFTE_FONT_ID_CACHE_CAP
 static inline void _sfte_font_update_scales(sfte_ctx *ctx, sfte_font_cache *cache);
 static inline void _sfte_font_pack_and_bake(sfte_ctx *ctx, sfte_font_cache *cache, sfte_glyph *g,
                                             int32_t font_idx, int32_t glyph_id, int32_t gw,
@@ -7200,6 +7232,9 @@ static inline void _sfte_font_clear_cache(sfte_font_cache *cache) {
         memset(cache->atlas_pxs, 0,
                SFTE_FONT_ATLAS_SIZE * SFTE_FONT_ATLAS_SIZE * _SFTE_FONT_ATLAS_BPP);
     if (cache->glyphs) memset(cache->glyphs, 0, SFTE_FONT_GLYPH_CAP * sizeof(sfte_glyph));
+#if SFTE_FONT_ID_CACHE_CAP
+    _sfte_font_id_cache_clear(cache);
+#endif  // SFTE_FONT_ID_CACHE_CAP
     cache->atlas_x = 0;
     cache->atlas_y = 0;
     cache->atlas_row_h = 0;
@@ -7289,6 +7324,15 @@ static inline sfte_glyph *_sfte_font_get_glyph(sfte_ctx *ctx, sfte_font_cache *c
 }
 
 /*
+    Memo table helpers.
+*/
+#if SFTE_FONT_ID_CACHE_CAP
+static inline void _sfte_font_id_cache_clear(sfte_font_cache *cache) {
+    memset(cache->id_cache, 0, sizeof(cache->id_cache));
+}
+#endif  // SFTE_FONT_ID_CACHE_CAP
+
+/*
     Resolves a unicode rune to a specific font index and TrueType glyph ID.
     Handles cascading fallback fonts.
     Sets both values to 0 if glyph is not found.
@@ -7297,17 +7341,41 @@ static inline void _sfte_font_resolve_rune(sfte_font_cache *cache, sfte_rune run
                                            uint8_t *out_font_idx, uint16_t *out_glyph_id) {
     if (rune == 0) rune = ' ';
 
+#if SFTE_FONT_ID_CACHE_CAP
+    uint32_t key = (uint32_t)rune + 1u;  // 0 marks an empty slot
+    sfte_font_id_entry *entry =
+        &cache->id_cache[((uint32_t)rune * 2654435761u) & (SFTE_FONT_ID_CACHE_CAP - 1u)];
+
+    if (entry->key == key) {
+        *out_font_idx = entry->font_idx;
+        *out_glyph_id = entry->glyph_id;
+        return;
+    }
+#endif  // SFTE_FONT_ID_CACHE_CAP
+
     for (uint8_t f = 0; f < cache->num_fonts; ++f) {
         uint16_t id = (uint16_t)SFTE_FONT_GET_ID(&cache->info[f], rune);
         if (id != 0) {
             *out_font_idx = f;
             *out_glyph_id = id;
+#if SFTE_FONT_ID_CACHE_CAP
+            entry->key = key;
+            entry->glyph_id = id;
+            entry->font_idx = f;
+#endif  // SFTE_FONT_ID_CACHE_CAP
             return;
         }
     }
 
     *out_font_idx = 0;
     *out_glyph_id = 0;
+#if SFTE_FONT_ID_CACHE_CAP
+    // Negative results are memoized too: missing runes are common when no
+    // fallback font covers them, and they would otherwise scan every font.
+    entry->key = key;
+    entry->glyph_id = 0;
+    entry->font_idx = 0;
+#endif  // SFTE_FONT_ID_CACHE_CAP
 }
 
 /*
@@ -10242,6 +10310,11 @@ static inline void _sfte_font_load_mem_sized(sfte_ctx *ctx, sfte_font_style styl
     cache->ttf_buf[idx] = (uint8_t *)ttf_data;
     cache->owns_ttf_buf[idx] = 0;
     cache->ttf_size[idx] = ttf_size;
+
+#if SFTE_FONT_ID_CACHE_CAP
+    // A new font (e.g. a fallback) can resolve runes that previously failed.
+    _sfte_font_id_cache_clear(cache);
+#endif  // SFTE_FONT_ID_CACHE_CAP
 
     if (idx == 0) {
         if (style == SFTE_FONT_STYLE_REGULAR && idx == 0)
