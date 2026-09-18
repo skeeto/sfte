@@ -19,7 +19,11 @@
 
 ## Platforms
 
-Currently, **sfte** only supports Wayland as a native experience.
+**sfte** ships with two native backends:
+
+- **Wayland** (Linux),
+- **Win32** (Windows, using ConPTY).
+
 That being said, custom backends are supported, allowing it to be ported to anything as easily as possible.
 
 Planned supported platforms are:
@@ -30,12 +34,14 @@ Planned supported platforms are:
 
 ## Installing
 
-### Prerequisites
+### Linux (Wayland)
+
+Prerequisites:
 
 - Any C compiler supporting C11+ standard
 - Development headers for `wayland-client` and `xkbcommon`
 
-### Getting started
+Getting started:
 
 1. Clone the repository.
 
@@ -55,6 +61,29 @@ cc nob.c -o nob
 ```sh
 ./nob install
 ```
+
+### Windows (Win32)
+
+Prerequisites:
+
+- A GCC/MinGW-w64 toolchain supporting C11+ (e.g. [w64devkit](https://github.com/skeeto/w64devkit)) on `PATH`
+- CMake 3.20+ (with Ninja or MinGW Makefiles)
+
+Getting started:
+
+1. Clone the repository and configure the build. On the first configure, `config.def.win32.c` is copied to `config.c`.
+
+```sh
+git clone https://github.com/nihiL7331/sfte.git --depth=1
+cd sfte
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+2. Run `build/sfte.exe`.
+
+The shell is resolved in this order: `SFTE_SHELL`, `ash.exe`, `powershell.exe`, `COMSPEC`, `cmd.exe`.
+Override it from `config.c` with `sfte_win32_set_shell(app, "...")` or via the `SFTE_SHELL` environment variable.
 
 ## Customization
 

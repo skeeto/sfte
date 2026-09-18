@@ -182,22 +182,42 @@ typedef struct sfte_font_backend_info sfte_font_backend_info;
 #include <stddef.h>  // size_t
 #include <stdint.h>
 
-#ifndef SFTE_NO_POSIX
-#include <errno.h>
-#include <unistd.h>
-#endif  // !SFTE_NO_POSIX
-
 #ifndef SFTE_CUSTOM_BACKEND
 #ifndef SFTE_WAYLAND
+#ifdef _WIN32
+#define SFTE_WAYLAND 0
+#else
 #define SFTE_WAYLAND 1
+#endif  // _WIN32
 #endif  // SFTE_WAYLAND
+#ifndef SFTE_WIN32
+#if defined(_WIN32) && !SFTE_WAYLAND
+#define SFTE_WIN32 1
+#else
+#define SFTE_WIN32 0
+#endif  // defined(_WIN32) && !SFTE_WAYLAND
+#endif  // SFTE_WIN32
 #else   // SFTE_CUSTOM_BACKEND
 #define SFTE_WAYLAND 0
+#define SFTE_WIN32 0
 #endif  // SFTE_CUSTOM_BACKEND
+
+#if SFTE_WAYLAND && SFTE_WIN32
+#error "SFTE_WAYLAND and SFTE_WIN32 cannot be enabled at the same time."
+#endif  // SFTE_WAYLAND && SFTE_WIN32
 
 #if SFTE_WAYLAND
 #define SFTE_XKB_COMMON
 #endif  // SFTE_WAYLAND
+
+#if SFTE_WIN32 && !defined(SFTE_NO_POSIX)
+#define SFTE_NO_POSIX
+#endif  // SFTE_WIN32 && !defined(SFTE_NO_POSIX)
+
+#ifndef SFTE_NO_POSIX
+#include <errno.h>
+#include <unistd.h>
+#endif  // !SFTE_NO_POSIX
 
 #ifdef SFTE_XKB_COMMON
 #include <xkbcommon/xkbcommon-keysyms.h>
@@ -1115,6 +1135,22 @@ static inline void _sfte_wayland_clipboard_copy(sfte_ctx *ctx, const sfte_arg *a
 static inline void _sfte_wayland_clipboard_paste(sfte_ctx *ctx, const sfte_arg *arg);
 #endif  // SFTE_WAYLAND
 
+#if SFTE_WIN32
+#if SFTE_FONT_ZOOM
+static inline void _sfte_win32_font_resize(sfte_ctx *ctx, const sfte_arg *arg);
+static inline void _sfte_win32_font_reset(sfte_ctx *ctx, const sfte_arg *arg);
+#endif  // SFTE_FONT_ZOOM
+#if SFTE_TERM_SCROLLBACK_CAP
+static inline void _sfte_win32_view_scroll(sfte_ctx *ctx, const sfte_arg *arg);
+#endif  // SFTE_TERM_SCROLLBACK_CAP
+#if SFTE_CLIPBOARD
+#if SFTE_INPUT_SELECTION
+static inline void _sfte_win32_clipboard_copy(sfte_ctx *ctx, const sfte_arg *arg);
+#endif  // SFTE_INPUT_SELECTION
+static inline void _sfte_win32_clipboard_paste(sfte_ctx *ctx, const sfte_arg *arg);
+#endif  // SFTE_CLIPBOARD
+#endif  // SFTE_WIN32
+
 #if SFTE_FONT_ZOOM && SFTE_WAYLAND
 #define _SFTE_WAYLAND_ZOOM_BINDS                                                                   \
     {SFTE_MOD_CTRL, XKB_KEY_equal, _sfte_wayland_font_resize, {.f = 2.0f}},                        \
@@ -1148,9 +1184,44 @@ static inline void _sfte_wayland_clipboard_paste(sfte_ctx *ctx, const sfte_arg *
 #define _SFTE_WAYLAND_COPY_BIND
 #endif  // !SFTE_CLIPBOARD || !SFTE_WAYLAND || !SFTE_INPUT_SELECTION
 
+#if SFTE_FONT_ZOOM && SFTE_WIN32
+#define _SFTE_WIN32_ZOOM_BINDS                                                                     \
+    {SFTE_MOD_CTRL, 0xBB /* VK_OEM_PLUS '='/'+' */, _sfte_win32_font_resize, {.f = 2.0f}},         \
+        {SFTE_MOD_CTRL, 0x6B /* VK_ADD */, _sfte_win32_font_resize, {.f = 2.0f}},                  \
+        {SFTE_MOD_CTRL, 0xBD /* VK_OEM_MINUS '-' */, _sfte_win32_font_resize, {.f = -2.0f}},       \
+        {SFTE_MOD_CTRL, 0x6D /* VK_SUBTRACT */, _sfte_win32_font_resize, {.f = -2.0f}},            \
+        {SFTE_MOD_CTRL, 0x30 /* '0' */, _sfte_win32_font_reset, {.v = NULL}},
+#else  // !SFTE_FONT_ZOOM || !SFTE_WIN32
+#define _SFTE_WIN32_ZOOM_BINDS
+#endif  // !SFTE_FONT_ZOOM || !SFTE_WIN32
+
+#if SFTE_TERM_SCROLLBACK_CAP && SFTE_WIN32
+#define _SFTE_WIN32_SCROLL_BINDS                                                                   \
+    {SFTE_MOD_SHIFT, 0x21 /* VK_PRIOR */, _sfte_win32_view_scroll, {.i = 10}},                     \
+        {SFTE_MOD_SHIFT, 0x22 /* VK_NEXT */, _sfte_win32_view_scroll, {.i = -10}},
+#else  // !SFTE_TERM_SCROLLBACK_CAP || !SFTE_WIN32
+#define _SFTE_WIN32_SCROLL_BINDS
+#endif  // !SFTE_TERM_SCROLLBACK_CAP || !SFTE_WIN32
+
+#if SFTE_CLIPBOARD && SFTE_WIN32
+#if SFTE_INPUT_SELECTION
+#define _SFTE_WIN32_COPY_BIND                                                                      \
+    {SFTE_MOD_CTRL | SFTE_MOD_SHIFT, 0x43 /* 'C' */, _sfte_win32_clipboard_copy, {.v = NULL}},
+#endif  // SFTE_INPUT_SELECTION
+#define _SFTE_WIN32_PASTE_BIND                                                                     \
+    {SFTE_MOD_CTRL | SFTE_MOD_SHIFT, 0x56 /* 'V' */, _sfte_win32_clipboard_paste, {.v = NULL}},
+#else  // !SFTE_CLIPBOARD || !SFTE_WIN32
+#define _SFTE_WIN32_PASTE_BIND
+#endif  // !SFTE_CLIPBOARD || !SFTE_WIN32
+
+#if !SFTE_CLIPBOARD || !SFTE_WIN32 || !SFTE_INPUT_SELECTION
+#define _SFTE_WIN32_COPY_BIND
+#endif  // !SFTE_CLIPBOARD || !SFTE_WIN32 || !SFTE_INPUT_SELECTION
+
 #define SFTE_BASE_SHORTCUTS                                                                        \
     _SFTE_WAYLAND_ZOOM_BINDS _SFTE_WAYLAND_SCROLL_BINDS _SFTE_WAYLAND_COPY_BIND                    \
-        _SFTE_WAYLAND_PASTE_BIND
+        _SFTE_WAYLAND_PASTE_BIND _SFTE_WIN32_ZOOM_BINDS _SFTE_WIN32_SCROLL_BINDS                   \
+            _SFTE_WIN32_COPY_BIND _SFTE_WIN32_PASTE_BIND
 
 #ifndef SFTE_SHORTCUTS
 #define SFTE_SHORTCUTS {SFTE_BASE_SHORTCUTS}
@@ -1473,6 +1544,36 @@ sfte_ctx *sfte_wayland_get_ctx(sfte_wayland_app *app);
 int sfte_wayland_run(sfte_wayland_app *app);
 #endif  // SFTE_WAYLAND
 
+// =================================================================================================
+// >>win32 backend
+// =================================================================================================
+
+#if SFTE_WIN32
+typedef struct sfte_win32_app sfte_win32_app;
+
+/*
+    Initializes the Win32 backend and `sfte_ctx`.
+    Call `sfte_win32_set_shell` (optional) and load fonts before `sfte_win32_run`.
+*/
+sfte_win32_app *sfte_win32_init(void);
+
+/*
+    Exposes the context for runtime configuration.
+*/
+sfte_ctx *sfte_win32_get_ctx(sfte_win32_app *app);
+
+/*
+    Creates the window and enters the blocking event loop, run it last.
+*/
+int sfte_win32_run(sfte_win32_app *app);
+
+/*
+    Overrides the shell command line (UTF-8). If not called, the backend resolves
+    SFTE_SHELL, ash.exe, powershell.exe, COMSPEC and finally cmd.exe.
+*/
+void sfte_win32_set_shell(sfte_win32_app *app, const char *cmdline);
+#endif  // SFTE_WIN32
+
 #ifdef SFTE_IMPL
 // #################################################################################################
 // >>>INTERNAL DECLARATIONS
@@ -1499,19 +1600,35 @@ int sfte_wayland_run(sfte_wayland_app *app);
 #include "vendor/stb_image.h"
 #endif  // SFTE_IMG_KITTY
 
-#include <fcntl.h>
 #include <locale.h>  // LC_ALL
-#include <poll.h>
-#include <pty.h>  // forkpty
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>  // memset
+
+#ifndef SFTE_NO_POSIX
+#include <fcntl.h>
+#include <poll.h>
+#include <pty.h>  // forkpty
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/timerfd.h>
 #include <sys/wait.h>
 #include <unistd.h>  // exec/fork/env
+#endif  // !SFTE_NO_POSIX
+
+#if SFTE_WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif  // WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif  // NOMINMAX
+#include <windows.h>
+#include <dwmapi.h>
+#include <shellapi.h>
+#include <wchar.h>
+#endif  // SFTE_WIN32
 
 #if SFTE_CURSOR_BLINK
 #include <time.h>
@@ -1590,20 +1707,51 @@ static const char *_sfte_log_messages[] = {_SFTE_LOG_ITEMS};
 #endif  // !SFTE_NO_LOGGING
 
 #if SFTE_FONT_WIDE_CHARS
+#ifdef _WIN32
+/*
+    Minimal wcwidth replacement for Windows toolchains (MinGW-w64 does not provide wcwidth).
+    Handles combining/zero-width marks and the common East Asian wide/fullwidth ranges.
+*/
+static inline int _sfte_win32_wcwidth(uint32_t rune) {
+    if ((rune >= 0x0300 && rune <= 0x036F) || (rune >= 0x1AB0 && rune <= 0x1AFF) ||
+        (rune >= 0x1DC0 && rune <= 0x1DFF) || (rune >= 0x20D0 && rune <= 0x20FF) ||
+        (rune >= 0xFE00 && rune <= 0xFE0F) || (rune >= 0xFE20 && rune <= 0xFE2F) ||
+        rune == 0x200B || rune == 0x200C || rune == 0x200D || rune == 0xFEFF)
+        return 0;
+
+    if ((rune >= 0x1100 && rune <= 0x115F) ||
+        (rune >= 0x2E80 && rune <= 0xA4CF && rune != 0x303F) ||
+        (rune >= 0xAC00 && rune <= 0xD7A3) || (rune >= 0xF900 && rune <= 0xFAFF) ||
+        (rune >= 0xFE10 && rune <= 0xFE19) || (rune >= 0xFE30 && rune <= 0xFE6F) ||
+        (rune >= 0xFF00 && rune <= 0xFF60) || (rune >= 0xFFE0 && rune <= 0xFFE6) ||
+        (rune >= 0x1F300 && rune <= 0x1FAFF) || (rune >= 0x20000 && rune <= 0x3FFFD))
+        return 2;
+
+    return 1;
+}
+#define _SFTE_CHAR_WIDTH(rune) _sfte_win32_wcwidth(rune)
+#else
 #include <wchar.h>
 #define _SFTE_CHAR_WIDTH(rune) wcwidth(rune)
+#endif  // _WIN32
 #else
 #define _SFTE_CHAR_WIDTH(rune) 1
 #endif
 
 #if SFTE_CURSOR_BLINK || SFTE_CURSOR_TRAIL || (SFTE_TERM_SCROLL_SMOOTH && SFTE_TERM_SCROLLBACK_CAP)
 #ifndef SFTE_TIME_MS
+#ifdef _WIN32
+static inline uint64_t _sfte_time_ms(void) {
+    return (uint64_t)GetTickCount64();
+}
+#else
 #include <time.h>
 static inline uint64_t _sfte_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
+#endif  // _WIN32
 #define SFTE_TIME_MS() _sfte_time_ms()
 #endif  // SFTE_TIME_MS
 #endif  // SFTE_CURSOR_BLINK || SFTE_CURSOR_TRAIL || (SFTE_TERM_SCROLL_SMOOTH &&
@@ -2107,6 +2255,40 @@ struct sfte_wayland_app {
 };
 #endif  // SFTE_WAYLAND
 
+#if SFTE_WIN32
+struct sfte_win32_app {
+    sfte_ctx *ctx;
+
+    HWND hwnd;
+    HINSTANCE hinstance;
+    HDC mem_dc;
+    HBITMAP dib;
+    HBITMAP old_dib;
+    uint32_t *pixels;
+    HBRUSH bg_brush;
+
+    int32_t width, height;
+    int32_t pending_width, pending_height;
+    uint8_t pending_resize;
+
+    HPCON hpc;
+    HANDLE pty_in_write;  // we write keystrokes here
+    HANDLE pty_out_read;  // we read shell output here
+    HANDLE pty_proc;      // shell process handle
+    DWORD pty_pid;
+    PROCESS_INFORMATION proc;
+    char *shell_cmdline;
+
+    uint8_t running;
+    uint8_t needs_render;
+
+    UINT dpi;
+    float font_scale;
+
+    WCHAR surrogate_high;
+};
+#endif  // SFTE_WIN32
+
 typedef struct {
     sfte_cell *main_grid;
 #if SFTE_TERM_SCROLLBACK_CAP
@@ -2571,6 +2753,45 @@ static inline void _sfte_wayland_clipboard_paste(sfte_ctx *ctx, const sfte_arg *
 #endif  // SFTE_CLIPBOARD
 static inline void _sfte_wayland_loop(sfte_wayland_app *app);
 #endif  // SFTE_WAYLAND
+
+// -------------------------------------------------------------------------------------------------
+// >win32
+// -------------------------------------------------------------------------------------------------
+#if SFTE_WIN32
+static inline void _sfte_win32_write_cb(void *user_data, const char *data, size_t len);
+static inline void _sfte_win32_title_cb(void *user_data, const char *title);
+static inline void _sfte_win32_pty_spawn(sfte_win32_app *app);
+static inline void _sfte_win32_pty_update(sfte_win32_app *app);
+static inline void _sfte_win32_create_backbuffer(sfte_win32_app *app);
+static inline void _sfte_win32_destroy_backbuffer(sfte_win32_app *app);
+static inline void _sfte_win32_render(sfte_win32_app *app);
+static inline void _sfte_win32_setup_dpi(sfte_win32_app *app);
+static inline void _sfte_win32_apply_dpi(sfte_win32_app *app, UINT new_dpi);
+static inline void _sfte_win32_register_class(sfte_win32_app *app);
+static inline void _sfte_win32_handle_keydown(sfte_win32_app *app, WPARAM vk, LPARAM lparam);
+static inline void _sfte_win32_handle_char(sfte_win32_app *app, WPARAM ch);
+static inline uint32_t _sfte_win32_mods(void);
+static inline sfte_key _sfte_win32_key_from_vk(WPARAM vk);
+static inline char *_sfte_win32_resolve_shell(void);
+static inline char *_sfte_win32_wide_to_utf8(const WCHAR *wide, int wide_len);
+static inline WCHAR *_sfte_win32_utf8_to_wide(const char *utf8);
+#if SFTE_INPUT_HYPERLINKS
+static inline void _sfte_win32_open_link_cb(void *user_data, const char *uri);
+#endif  // SFTE_INPUT_HYPERLINKS
+#if SFTE_CLIPBOARD
+static inline void _sfte_win32_clipboard_set(const char *utf8);
+static inline char *_sfte_win32_clipboard_get(void);
+#if SFTE_INPUT_SELECTION
+#if SFTE_CLIPBOARD_OSC52
+static inline void _sfte_win32_osc52_clipboard_cb(void *user_data, char target, const char *data);
+#endif  // SFTE_CLIPBOARD_OSC52
+static inline void _sfte_win32_clipboard_copy(sfte_ctx *ctx, const sfte_arg *arg);
+#endif  // SFTE_INPUT_SELECTION
+static inline void _sfte_win32_clipboard_paste(sfte_ctx *ctx, const sfte_arg *arg);
+#endif  // SFTE_CLIPBOARD
+static inline void _sfte_win32_loop(sfte_win32_app *app);
+static inline void _sfte_win32_unload(sfte_win32_app *app);
+#endif  // SFTE_WIN32
 
 // #################################################################################################
 // >>>INTERNAL IMPLEMENTATION
@@ -9062,6 +9283,706 @@ static inline void _sfte_wayland_loop(sfte_wayland_app *app) {
     }
 }
 #endif  // SFTE_WAYLAND
+
+// =================================================================================================
+// >>win32
+// =================================================================================================
+#if SFTE_WIN32
+/*
+    Converts a null-terminated (or explicitly sized) UTF-16 string into a heap UTF-8 string.
+    The caller owns the returned buffer and must free it with SFTE_FREE.
+*/
+static inline char *_sfte_win32_wide_to_utf8(const WCHAR *wide, int wide_len) {
+    if (!wide) return NULL;
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, NULL, 0, NULL, NULL);
+    if (len <= 0) return NULL;
+    char *out = (char *)SFTE_MALLOC((size_t)len + 1);
+    if (!out) return NULL;
+    WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, out, len, NULL, NULL);
+    out[len] = '\0';
+    return out;
+}
+
+/*
+    Converts a null-terminated UTF-8 string into a heap UTF-16 string.
+    The caller owns the returned buffer and must free it with SFTE_FREE.
+*/
+static inline WCHAR *_sfte_win32_utf8_to_wide(const char *utf8) {
+    if (!utf8) return NULL;
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    if (len <= 0) return NULL;
+    WCHAR *out = (WCHAR *)SFTE_MALLOC((size_t)len * sizeof(WCHAR));
+    if (!out) return NULL;
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, out, len);
+    return out;
+}
+
+static inline char *_sfte_win32_dup(const char *s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    char *out = (char *)SFTE_MALLOC(len + 1);
+    if (!out) return NULL;
+    memcpy(out, s, len + 1);
+    return out;
+}
+
+/*
+    Resolves the shell command line to launch, in priority order:
+        SFTE_SHELL -> ash.exe -> powershell.exe -> COMSPEC -> cmd.exe
+*/
+static inline char *_sfte_win32_resolve_shell(void) {
+    const char *env = getenv("SFTE_SHELL");
+    if (env && *env) return _sfte_win32_dup(env);
+
+    static const char *candidates[] = {"ash.exe", "powershell.exe"};
+    for (size_t i = 0; i < _SFTE_ARRAY_LEN(candidates); ++i) {
+        char found[MAX_PATH];
+        DWORD n = SearchPathA(NULL, candidates[i], NULL, MAX_PATH, found, NULL);
+        if (n > 0 && n < MAX_PATH) return _sfte_win32_dup(found);
+    }
+
+    env = getenv("COMSPEC");
+    if (env && *env) return _sfte_win32_dup(env);
+
+    return _sfte_win32_dup("cmd.exe");
+}
+
+static inline void _sfte_win32_write_cb(void *user_data, const char *data, size_t len) {
+    sfte_win32_app *app = (sfte_win32_app *)user_data;
+    if (!app->pty_in_write || !data || !len) return;
+    DWORD written = 0;
+    (void)WriteFile(app->pty_in_write, data, (DWORD)len, &written, NULL);
+}
+
+static inline void _sfte_win32_title_cb(void *user_data, const char *title) {
+    sfte_win32_app *app = (sfte_win32_app *)user_data;
+    if (!app->hwnd || !title) return;
+    WCHAR *wide = _sfte_win32_utf8_to_wide(title);
+    if (wide) {
+        SetWindowTextW(app->hwnd, wide);
+        SFTE_FREE(wide);
+    }
+}
+
+/*
+    Creates the ConPTY pseudo console and spawns the shell process attached to it.
+*/
+static inline void _sfte_win32_pty_spawn(sfte_win32_app *app) {
+    SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+    HANDLE in_read = NULL, in_write = NULL, out_read = NULL, out_write = NULL;
+
+    if (!CreatePipe(&in_read, &in_write, &sa, 0) ||
+        !CreatePipe(&out_read, &out_write, &sa, 0)) {
+        _SFTE_ERROR(app->ctx, PTY_FORK_FAIL, (int)GetLastError());
+        return;
+    }
+
+    COORD size = {(SHORT)app->ctx->term.cols, (SHORT)app->ctx->term.rows};
+    HRESULT hr = CreatePseudoConsole(size, in_read, out_write, 0, &app->hpc);
+    if (FAILED(hr)) {
+        _SFTE_ERROR(app->ctx, PTY_FORK_FAIL, (int)GetLastError());
+        CloseHandle(in_read);
+        CloseHandle(in_write);
+        CloseHandle(out_read);
+        CloseHandle(out_write);
+        return;
+    }
+    CloseHandle(in_read);
+    CloseHandle(out_write);
+
+    SIZE_T attr_size = 0;
+    (void)InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)SFTE_MALLOC(attr_size);
+    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size) ||
+        !UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, app->hpc,
+                                   sizeof(HPCON), NULL, NULL)) {
+        _SFTE_ERROR(app->ctx, PTY_FORK_FAIL, (int)GetLastError());
+        if (attrs) SFTE_FREE(attrs);
+        CloseHandle(in_write);
+        CloseHandle(out_read);
+        ClosePseudoConsole(app->hpc);
+        app->hpc = NULL;
+        return;
+    }
+
+    STARTUPINFOEXW si = {0};
+    si.StartupInfo.cb = sizeof(si);
+    si.lpAttributeList = attrs;
+    // Without this, the child inherits our (possibly redirected) std handles instead of the
+    // pseudoconsole. The system reconnects the child's std handles to the pseudoconsole.
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = NULL;
+    si.StartupInfo.hStdOutput = NULL;
+    si.StartupInfo.hStdError = NULL;
+
+    SetEnvironmentVariableA("TERM", SFTE_TERM_ENV);
+
+    WCHAR *cmd = _sfte_win32_utf8_to_wide(app->shell_cmdline ? app->shell_cmdline : "cmd.exe");
+    BOOL ok = FALSE;
+    if (cmd) {
+        ok = CreateProcessW(NULL, cmd, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
+                            &si.StartupInfo, &app->proc);
+        SFTE_FREE(cmd);
+    }
+    DeleteProcThreadAttributeList(attrs);
+    SFTE_FREE(attrs);
+
+    if (!ok) {
+        _SFTE_ERROR(app->ctx, PTY_FORK_FAIL, (int)GetLastError());
+        CloseHandle(in_write);
+        CloseHandle(out_read);
+        return;
+    }
+
+    CloseHandle(app->proc.hThread);
+    app->pty_in_write = in_write;
+    app->pty_out_read = out_read;
+    app->pty_proc = app->proc.hProcess;
+    app->pty_pid = app->proc.dwProcessId;
+
+    _SFTE_INFO(app->ctx, PTY_SPAWN);
+}
+
+static inline void _sfte_win32_pty_update(sfte_win32_app *app) {
+    if (!app->hpc) return;
+    COORD size = {(SHORT)app->ctx->term.cols, (SHORT)app->ctx->term.rows};
+    ResizePseudoConsole(app->hpc, size);
+}
+
+static inline void _sfte_win32_destroy_backbuffer(sfte_win32_app *app) {
+    if (app->mem_dc && app->old_dib) SelectObject(app->mem_dc, app->old_dib);
+    if (app->dib) DeleteObject(app->dib);
+    if (app->mem_dc) DeleteDC(app->mem_dc);
+    app->dib = NULL;
+    app->old_dib = NULL;
+    app->mem_dc = NULL;
+    app->pixels = NULL;
+}
+
+/*
+    Allocates a top-down 32bpp DIB section. Its BGRA layout matches the emulator's ARGB buffer.
+*/
+static inline void _sfte_win32_create_backbuffer(sfte_win32_app *app) {
+    _sfte_win32_destroy_backbuffer(app);
+    if (app->width <= 0 || app->height <= 0) return;
+
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = app->width;
+    bmi.bmiHeader.biHeight = -app->height;  // negative -> top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    HDC screen = GetDC(NULL);
+    app->mem_dc = CreateCompatibleDC(screen);
+    app->dib = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, (void **)&app->pixels, NULL, 0);
+    ReleaseDC(NULL, screen);
+
+    if (app->mem_dc && app->dib) app->old_dib = (HBITMAP)SelectObject(app->mem_dc, app->dib);
+    else _sfte_win32_destroy_backbuffer(app);
+}
+
+static inline void _sfte_win32_setup_dpi(sfte_win32_app *app) {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    HDC screen = GetDC(NULL);
+    app->dpi = (UINT)GetDeviceCaps(screen, LOGPIXELSY);
+    ReleaseDC(NULL, screen);
+    if (app->dpi == 0) app->dpi = 96;
+    app->font_scale = (float)app->dpi / 96.0f;
+}
+
+static inline void _sfte_win32_apply_dpi(sfte_win32_app *app, UINT new_dpi) {
+    if (new_dpi == 0) new_dpi = 96;
+    app->dpi = new_dpi;
+    app->font_scale = (float)new_dpi / 96.0f;
+#if SFTE_FONT_ZOOM
+    float target = SFTE_FONT_DEFAULT_SIZE * app->font_scale;
+    float delta = target - app->ctx->font.cur_size;
+    if (delta != 0.0f) sfte_zoom(app->ctx, delta);
+#endif  // SFTE_FONT_ZOOM
+    app->needs_render = 1;
+}
+
+/*
+    Renders the grid into the DIB and blits only the damaged region to the window.
+*/
+static inline void _sfte_win32_render(sfte_win32_app *app) {
+    if (!app->pixels || app->width <= 0 || app->height <= 0) return;
+
+    sfte_damage_rect dmg = {0};
+    sfte_render(app->ctx, app->pixels, app->width, app->height, &dmg);
+
+    if (dmg.w > 0 && dmg.h > 0) {
+        HDC dc = GetDC(app->hwnd);
+        BitBlt(dc, dmg.x, dmg.y, dmg.w, dmg.h, app->mem_dc, dmg.x, dmg.y, SRCCOPY);
+        ReleaseDC(app->hwnd, dc);
+    }
+    app->needs_render = 0;
+}
+
+static inline uint32_t _sfte_win32_mods(void) {
+    uint32_t mods = SFTE_MOD_NONE;
+    if (GetKeyState(VK_CONTROL) & 0x8000) mods |= SFTE_MOD_CTRL;
+    if (GetKeyState(VK_MENU) & 0x8000) mods |= SFTE_MOD_ALT;
+    if (GetKeyState(VK_SHIFT) & 0x8000) mods |= SFTE_MOD_SHIFT;
+    if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000))
+        mods |= SFTE_MOD_SUPER;
+    return mods;
+}
+
+static inline sfte_key _sfte_win32_key_from_vk(WPARAM vk) {
+    switch (vk) {
+    case VK_TAB: return SFTE_KEY_TAB;
+    case VK_RETURN: return SFTE_KEY_ENTER;
+    case VK_ESCAPE: return SFTE_KEY_ESCAPE;
+    case VK_BACK: return SFTE_KEY_BACKSPACE;
+    case VK_UP: return SFTE_KEY_UP;
+    case VK_DOWN: return SFTE_KEY_DOWN;
+    case VK_LEFT: return SFTE_KEY_LEFT;
+    case VK_RIGHT: return SFTE_KEY_RIGHT;
+    case VK_HOME: return SFTE_KEY_HOME;
+    case VK_END: return SFTE_KEY_END;
+    case VK_PRIOR: return SFTE_KEY_PAGE_UP;
+    case VK_NEXT: return SFTE_KEY_PAGE_DOWN;
+    case VK_INSERT: return SFTE_KEY_INSERT;
+    case VK_DELETE: return SFTE_KEY_DELETE;
+    case VK_F1: return SFTE_KEY_F1;
+    case VK_F2: return SFTE_KEY_F2;
+    case VK_F3: return SFTE_KEY_F3;
+    case VK_F4: return SFTE_KEY_F4;
+    case VK_F5: return SFTE_KEY_F5;
+    case VK_F6: return SFTE_KEY_F6;
+    case VK_F7: return SFTE_KEY_F7;
+    case VK_F8: return SFTE_KEY_F8;
+    case VK_F9: return SFTE_KEY_F9;
+    case VK_F10: return SFTE_KEY_F10;
+    case VK_F11: return SFTE_KEY_F11;
+    case VK_F12: return SFTE_KEY_F12;
+    default: return SFTE_KEY_NONE;
+    }
+}
+
+static inline void _sfte_win32_handle_keydown(sfte_win32_app *app, WPARAM vk, LPARAM lparam) {
+    uint32_t mods = _sfte_win32_mods();
+
+    size_t shortcut_count = _SFTE_ARRAY_LEN(_sfte_shortcuts);
+    for (size_t i = 0; i != shortcut_count; ++i)
+        if (_sfte_shortcuts[i].keysym == (uint32_t)vk &&
+            _sfte_shortcuts[i].mod_mask == mods) {
+            _sfte_shortcuts[i].func(app->ctx, &_sfte_shortcuts[i].arg);
+            return;
+        }
+
+    sfte_key key = _sfte_win32_key_from_vk(vk);
+    if (key != SFTE_KEY_NONE) {
+        sfte_input_key(app->ctx, key, mods);
+        return;
+    }
+
+    // For modified printable keys, WM_CHAR only reports the resulting control character.
+    // Resolve the base character with Ctrl/Alt/Win cleared and route it through the core so
+    // Ctrl+<key>, Alt+<key> and the kitty keyboard protocol behave like the Wayland backend.
+    uint8_t altgr = (GetKeyState(VK_RMENU) & 0x8000) != 0;
+    if (!altgr && (mods & (SFTE_MOD_CTRL | SFTE_MOD_ALT | SFTE_MOD_SUPER))) {
+        BYTE keystate[256];
+        GetKeyboardState(keystate);
+        keystate[VK_CONTROL] = 0;
+        keystate[VK_MENU] = 0;
+        keystate[VK_LWIN] = 0;
+        keystate[VK_RWIN] = 0;
+
+        WCHAR buf[8];
+        int n = ToUnicodeEx((UINT)vk, (UINT)((lparam >> 16) & 0xFF), keystate, buf, 8, 0,
+                            GetKeyboardLayout(0));
+        if (n == 1 && buf[0] >= 32 && buf[0] < 127)
+            sfte_input_key(app->ctx, (sfte_key)buf[0], mods);
+    }
+}
+
+static inline void _sfte_win32_handle_char(sfte_win32_app *app, WPARAM ch) {
+    if (ch < 32 || ch == 127) return;  // control keys are handled via WM_KEYDOWN
+
+    uint32_t mods = _sfte_win32_mods();
+    uint8_t altgr = (GetKeyState(VK_RMENU) & 0x8000) != 0;
+    if (!altgr && (mods & (SFTE_MOD_CTRL | SFTE_MOD_ALT | SFTE_MOD_SUPER))) return;
+
+    WCHAR pair[3];
+    int pair_len = 1;
+    pair[0] = (WCHAR)ch;
+
+    if (pair[0] >= 0xD800 && pair[0] <= 0xDBFF) {
+        app->surrogate_high = pair[0];
+        return;
+    }
+    if (pair[0] >= 0xDC00 && pair[0] <= 0xDFFF) {
+        if (!app->surrogate_high) return;
+        pair[0] = app->surrogate_high;
+        pair[1] = (WCHAR)ch;
+        pair_len = 2;
+    }
+    app->surrogate_high = 0;
+
+    char utf8[8];
+    int n = WideCharToMultiByte(CP_UTF8, 0, pair, pair_len, utf8, sizeof(utf8), NULL, NULL);
+    if (n > 0) sfte_input_text(app->ctx, utf8, (size_t)n);
+}
+
+static inline void _sfte_win32_apply_dark_title(HWND hwnd) {
+    BOOL dark = TRUE;
+    if (FAILED(DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark))))
+        (void)DwmSetWindowAttribute(hwnd, 19, &dark, sizeof(dark));
+}
+
+static inline LRESULT CALLBACK _sfte_win32_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam,
+                                                    LPARAM lparam) {
+    sfte_win32_app *app = (sfte_win32_app *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+
+    if (msg == WM_NCCREATE) {
+        CREATESTRUCTW *cs = (CREATESTRUCTW *)lparam;
+        app = (sfte_win32_app *)cs->lpCreateParams;
+        app->hwnd = hwnd;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)app);
+    }
+    if (!app) return DefWindowProcW(hwnd, msg, wparam, lparam);
+
+    switch (msg) {
+    case WM_ERASEBKGND: return 1;
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+        if (app->mem_dc && app->pixels) {
+            // While a live resize is in progress the event loop is blocked, so the backbuffer
+            // can be smaller than the client area. Fill the exposed strips with the terminal
+            // background instead of leaving them unpainted.
+            RECT client;
+            GetClientRect(hwnd, &client);
+            if (app->width < client.right) {
+                RECT strip = {app->width, 0, client.right, client.bottom};
+                FillRect(dc, &strip, app->bg_brush);
+            }
+            if (app->height < client.bottom) {
+                RECT strip = {0, app->height, client.right, client.bottom};
+                FillRect(dc, &strip, app->bg_brush);
+            }
+            BitBlt(dc, 0, 0, app->width, app->height, app->mem_dc, 0, 0, SRCCOPY);
+        } else {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            FillRect(dc, &rc, app->bg_brush);
+        }
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    case WM_SIZE: {
+        if (wparam == SIZE_MINIMIZED) return 0;
+        app->pending_width = (int32_t)LOWORD(lparam);
+        app->pending_height = (int32_t)HIWORD(lparam);
+        app->pending_resize = 1;
+        return 0;
+    }
+
+    case WM_DPICHANGED: {
+        RECT *suggested = (RECT *)lparam;
+        SetWindowPos(hwnd, NULL, suggested->left, suggested->top, suggested->right - suggested->left,
+                     suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        _sfte_win32_apply_dpi(app, (UINT)HIWORD(wparam));
+        return 0;
+    }
+
+#if SFTE_TERM_FOCUS
+    case WM_SETFOCUS:
+        sfte_set_focus(app->ctx, 1);
+        app->needs_render = 1;
+        return 0;
+    case WM_KILLFOCUS:
+        sfte_set_focus(app->ctx, 0);
+        app->needs_render = 1;
+        return 0;
+#endif  // SFTE_TERM_FOCUS
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        _sfte_win32_handle_keydown(app, wparam, lparam);
+        return 0;
+
+    case WM_CHAR:
+    case WM_SYSCHAR:
+        _sfte_win32_handle_char(app, wparam);
+        return 0;
+
+#if SFTE_INPUT_MOUSE
+    case WM_MOUSEMOVE:
+        sfte_mouse_move(app->ctx, (int32_t)(int16_t)LOWORD(lparam), (int32_t)(int16_t)HIWORD(lparam));
+        app->needs_render = 1;
+        return 0;
+
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP: {
+        int32_t x = (int32_t)(int16_t)LOWORD(lparam);
+        int32_t y = (int32_t)(int16_t)HIWORD(lparam);
+        uint8_t pressed = (msg == WM_LBUTTONDOWN);
+        sfte_mouse_click(app->ctx, SFTE_MOUSE_BUTTON_LEFT, pressed, x, y);
+#if SFTE_CLIPBOARD && SFTE_INPUT_SELECTION
+        if (!pressed) _sfte_win32_clipboard_copy(app->ctx, NULL);
+#endif  // SFTE_CLIPBOARD && SFTE_INPUT_SELECTION
+        app->needs_render = 1;
+        return 0;
+    }
+
+    case WM_MOUSEWHEEL: {
+        int32_t delta = GET_WHEEL_DELTA_WPARAM(wparam);
+        POINT pt = {(LONG)(int16_t)LOWORD(lparam), (LONG)(int16_t)HIWORD(lparam)};
+        ScreenToClient(hwnd, &pt);
+        sfte_mouse_scroll(app->ctx, delta > 0 ? 1 : -1, pt.x, pt.y);
+        app->needs_render = 1;
+        return 0;
+    }
+#endif  // SFTE_INPUT_MOUSE
+
+    case WM_CLOSE:
+        app->running = 0;
+        DestroyWindow(hwnd);
+        return 0;
+
+    case WM_DESTROY:
+        app->hwnd = NULL;
+        PostQuitMessage(0);
+        return 0;
+
+    default: break;
+    }
+
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+static inline void _sfte_win32_register_class(sfte_win32_app *app) {
+    uint32_t bg = SFTE_COLOR_BG;
+    app->bg_brush = CreateSolidBrush(RGB((bg >> 16) & 0xFF, (bg >> 8) & 0xFF, bg & 0xFF));
+
+    WNDCLASSEXW wc = {0};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    wc.lpfnWndProc = _sfte_win32_wnd_proc;
+    wc.hInstance = app->hinstance;
+    wc.hCursor = LoadCursor(NULL, IDC_IBEAM);
+    wc.hbrBackground = app->bg_brush;
+    wc.lpszClassName = L"sfte_win32";
+    RegisterClassExW(&wc);
+}
+
+#if SFTE_CLIPBOARD
+static inline void _sfte_win32_clipboard_set(const char *utf8) {
+    if (!utf8) return;
+    WCHAR *wide = _sfte_win32_utf8_to_wide(utf8);
+    if (!wide) return;
+
+    size_t bytes = (wcslen(wide) + 1) * sizeof(WCHAR);
+    if (OpenClipboard(NULL)) {
+        EmptyClipboard();
+        HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (mem) {
+            void *dst = GlobalLock(mem);
+            if (dst) {
+                memcpy(dst, wide, bytes);
+                GlobalUnlock(mem);
+                if (!SetClipboardData(CF_UNICODETEXT, mem)) GlobalFree(mem);
+            } else {
+                GlobalFree(mem);
+            }
+        }
+        CloseClipboard();
+    }
+    SFTE_FREE(wide);
+}
+
+static inline char *_sfte_win32_clipboard_get(void) {
+    char *out = NULL;
+    if (OpenClipboard(NULL)) {
+        HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+        if (handle) {
+            const WCHAR *wide = (const WCHAR *)GlobalLock(handle);
+            if (wide) {
+                out = _sfte_win32_wide_to_utf8(wide, -1);
+                GlobalUnlock(handle);
+            }
+        }
+        CloseClipboard();
+    }
+    return out;
+}
+
+#if SFTE_INPUT_SELECTION
+#if SFTE_CLIPBOARD_OSC52
+static inline void _sfte_win32_osc52_clipboard_cb(void *user_data, char target, const char *data) {
+    (void)user_data;
+    if (target != 'c' || !data) return;
+    _sfte_win32_clipboard_set(data);
+}
+#endif  // SFTE_CLIPBOARD_OSC52
+
+static inline void _sfte_win32_clipboard_copy(sfte_ctx *ctx, const sfte_arg *arg) {
+    (void)arg;
+    if (!ctx->term.mouse_sel_active) return;
+
+    size_t needed = sfte_get_selection(ctx, NULL, 0);
+    if (needed == 0) {
+        _SFTE_INFO(ctx, CLIPBOARD_EMPTY);
+        return;
+    }
+
+    char *buf = (char *)SFTE_MALLOC(needed);
+    if (!buf) return;
+    sfte_get_selection(ctx, buf, needed);
+    _sfte_win32_clipboard_set(buf);
+    SFTE_FREE(buf);
+}
+#endif  // SFTE_INPUT_SELECTION
+
+static inline void _sfte_win32_clipboard_paste(sfte_ctx *ctx, const sfte_arg *arg) {
+    (void)arg;
+    char *text = _sfte_win32_clipboard_get();
+    if (!text) return;
+    sfte_input_paste_begin(ctx);
+    sfte_input_text(ctx, text, strlen(text));
+    sfte_input_paste_end(ctx);
+    SFTE_FREE(text);
+}
+#endif  // SFTE_CLIPBOARD
+
+#if SFTE_INPUT_HYPERLINKS
+static inline void _sfte_win32_open_link_cb(void *user_data, const char *uri) {
+    (void)user_data;
+    if (!uri) return;
+    WCHAR *wide = _sfte_win32_utf8_to_wide(uri);
+    if (!wide) return;
+    (void)ShellExecuteW(NULL, L"open", wide, NULL, NULL, SW_SHOWNORMAL);
+    SFTE_FREE(wide);
+}
+#endif  // SFTE_INPUT_HYPERLINKS
+
+#if SFTE_FONT_ZOOM
+static inline void _sfte_win32_font_resize(sfte_ctx *ctx, const sfte_arg *arg) {
+    sfte_win32_app *app = (sfte_win32_app *)ctx->user_data;
+    sfte_zoom(ctx, arg->f);
+    _sfte_win32_pty_update(app);
+    app->needs_render = 1;
+}
+
+static inline void _sfte_win32_font_reset(sfte_ctx *ctx, const sfte_arg *dummy) {
+    (void)dummy;
+    sfte_win32_app *app = (sfte_win32_app *)ctx->user_data;
+    const sfte_arg arg = {.f = (SFTE_FONT_DEFAULT_SIZE * app->font_scale) - ctx->font.cur_size};
+    _sfte_win32_font_resize(ctx, &arg);
+}
+#endif  // SFTE_FONT_ZOOM
+
+#if SFTE_TERM_SCROLLBACK_CAP
+static inline void _sfte_win32_view_scroll(sfte_ctx *ctx, const sfte_arg *arg) {
+    sfte_view_scroll(ctx, arg->i);
+    sfte_win32_app *app = (sfte_win32_app *)ctx->user_data;
+    app->needs_render = 1;
+}
+#endif  // SFTE_TERM_SCROLLBACK_CAP
+
+/*
+    The primary Win32 event loop. Waits simultaneously for window messages, shell output on the
+    ConPTY pipe, shell process termination and the core's blink/animation timeout.
+*/
+static inline void _sfte_win32_loop(sfte_win32_app *app) {
+    while (app->running) {
+        MSG msg;
+        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                app->running = 0;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (!app->running) break;
+
+        if (app->pending_resize) {
+            app->pending_resize = 0;
+            if (app->pending_width > 0 && app->pending_height > 0 &&
+                (app->pending_width != app->width || app->pending_height != app->height)) {
+                app->width = app->pending_width;
+                app->height = app->pending_height;
+                sfte_resize(app->ctx, app->width, app->height);
+                _sfte_win32_create_backbuffer(app);
+                _sfte_win32_pty_update(app);
+                app->needs_render = 1;
+            }
+        }
+
+        if (sfte_tick(app->ctx)) app->needs_render = 1;
+
+        HANDLE handles[2];
+        DWORD count = 0;
+        if (app->pty_out_read) handles[count++] = app->pty_out_read;
+        if (app->pty_proc) handles[count++] = app->pty_proc;
+
+        int32_t timeout = sfte_get_timeout_ms(app->ctx);
+        DWORD wait_ms = (timeout < 0) ? INFINITE : (DWORD)timeout;
+        if (app->needs_render) wait_ms = 0;
+
+        DWORD wait = MsgWaitForMultipleObjects(count, count ? handles : NULL, FALSE, wait_ms,
+                                               QS_ALLINPUT);
+        if (wait == WAIT_FAILED) {
+            app->running = 0;
+            break;
+        }
+        if (count > 0 && wait == WAIT_OBJECT_0) {
+            uint8_t buf[SFTE_TERM_PTY_BUF_SIZE];
+            for (;;) {
+                DWORD avail = 0;
+                if (!PeekNamedPipe(app->pty_out_read, NULL, 0, NULL, &avail, NULL)) {
+                    app->running = 0;  // pipe broken
+                    break;
+                }
+                if (avail == 0) break;
+
+                DWORD read = 0;
+                if (!ReadFile(app->pty_out_read, buf, sizeof(buf), &read, NULL) || read == 0) {
+                    app->running = 0;
+                    break;
+                }
+                sfte_parse(app->ctx, buf, read);
+                app->needs_render = 1;
+            }
+        } else if (count > 1 && wait == WAIT_OBJECT_0 + 1) {
+            app->running = 0;
+        }
+
+        // The pipe can remain signaled with no data at EOF; rely on the process handle to
+        // detect that the shell has exited.
+        if (app->running && app->pty_proc &&
+            WaitForSingleObject(app->pty_proc, 0) == WAIT_OBJECT_0)
+            app->running = 0;
+
+        if (app->needs_render) _sfte_win32_render(app);
+    }
+}
+
+static inline void _sfte_win32_unload(sfte_win32_app *app) {
+    _sfte_win32_destroy_backbuffer(app);
+    if (app->bg_brush) DeleteObject(app->bg_brush);
+    if (app->pty_in_write) CloseHandle(app->pty_in_write);
+    if (app->pty_out_read) CloseHandle(app->pty_out_read);
+    if (app->hpc) ClosePseudoConsole(app->hpc);
+    if (app->pty_proc) CloseHandle(app->pty_proc);
+    if (app->shell_cmdline) SFTE_FREE(app->shell_cmdline);
+    if (app->hwnd) DestroyWindow(app->hwnd);
+    app->pty_in_write = NULL;
+    app->pty_out_read = NULL;
+    app->hpc = NULL;
+    app->pty_proc = NULL;
+}
+#endif  // SFTE_WIN32
+
 // #################################################################################################
 // >>>PUBLIC IMPLEMENTATION
 // #################################################################################################
@@ -9269,7 +10190,10 @@ void sfte_font_load_file(sfte_ctx *ctx, sfte_font_style style, const char *path)
     if (!cache) return;
 
     FILE *f = fopen(path, "rb");
-    if (!f) _SFTE_ERROR(ctx, FONT_LOAD_FAIL, path);
+    if (!f) {
+        _SFTE_ERROR(ctx, FONT_LOAD_FAIL, path);
+        return;
+    }
 
     fseek(f, 0, SEEK_END);
     size_t size = ftell(f);
@@ -10218,4 +11142,105 @@ int sfte_wayland_run(sfte_wayland_app *app) {
     return 0;
 }
 #endif  // SFTE_WAYLAND
+
+// =================================================================================================
+// >>win32 backend
+// =================================================================================================
+#if SFTE_WIN32
+sfte_win32_app *sfte_win32_init(void) {
+    sfte_win32_app *app = (sfte_win32_app *)SFTE_CALLOC(1, sizeof(sfte_win32_app));
+    SFTE_ASSERT(app, "failed to allocate win32 app");
+
+    app->running = 1;
+    app->hinstance = GetModuleHandleW(NULL);
+    app->ctx = sfte_init(_sfte_win32_write_cb, app);
+
+#if SFTE_CLIPBOARD && SFTE_INPUT_SELECTION && SFTE_CLIPBOARD_OSC52
+    app->ctx->osc52_clipboard_cb = _sfte_win32_osc52_clipboard_cb;
+#endif  // SFTE_CLIPBOARD && SFTE_INPUT_SELECTION && SFTE_CLIPBOARD_OSC52
+#if SFTE_INPUT_HYPERLINKS
+    app->ctx->open_link_cb = _sfte_win32_open_link_cb;
+#endif  // SFTE_INPUT_HYPERLINKS
+    app->ctx->title_cb = _sfte_win32_title_cb;
+
+    app->shell_cmdline = _sfte_win32_resolve_shell();
+    _sfte_win32_setup_dpi(app);
+
+    return app;
+}
+
+sfte_ctx *sfte_win32_get_ctx(sfte_win32_app *app) {
+    return app->ctx;
+}
+
+void sfte_win32_set_shell(sfte_win32_app *app, const char *cmdline) {
+    if (!app || !cmdline) return;
+    if (app->shell_cmdline) SFTE_FREE(app->shell_cmdline);
+    app->shell_cmdline = _sfte_win32_dup(cmdline);
+}
+
+int sfte_win32_run(sfte_win32_app *app) {
+#ifdef SFTE_FONT_BOLD
+    SFTE_ASSERT(app->ctx->font.bold.glyphs && app->ctx->font.bold.atlas_pxs,
+                "if SFTE_FONT_BOLD is defined, a bold font must be provided using "
+                "sfte_font_load_*");
+#endif  // SFTE_FONT_BOLD
+#ifdef SFTE_FONT_ITALIC
+    SFTE_ASSERT(app->ctx->font.italic.glyphs && app->ctx->font.italic.atlas_pxs,
+                "if SFTE_FONT_ITALIC is defined, an italic font must be provided using "
+                "sfte_font_load_*");
+#endif  // SFTE_FONT_ITALIC
+#ifdef SFTE_FONT_BOLD_ITALIC
+    SFTE_ASSERT(app->ctx->font.bold_italic.glyphs && app->ctx->font.bold_italic.atlas_pxs,
+                "if SFTE_FONT_BOLD_ITALIC is defined, a bold italic font must be provided using "
+                "sfte_font_load_*");
+#endif  // SFTE_FONT_BOLD_ITALIC
+
+    // Fonts are loaded by now; scale the default size to the system DPI before sizing the window.
+    _sfte_win32_apply_dpi(app, app->dpi);
+
+    int32_t ideal_w, ideal_h;
+    sfte_get_ideal_size(app->ctx, SFTE_TERM_INIT_COLS, SFTE_TERM_INIT_ROWS, &ideal_w, &ideal_h);
+    app->width = ideal_w;
+    app->height = ideal_h;
+    sfte_resize(app->ctx, app->width, app->height);
+
+    _sfte_win32_register_class(app);
+
+    RECT rect = {0, 0, app->width, app->height};
+    AdjustWindowRectExForDpi(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0, app->dpi);
+    HWND hwnd = CreateWindowExW(0, L"sfte_win32", L"sfte", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+                                CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, NULL,
+                                NULL, app->hinstance, app);
+    if (!hwnd) {
+        _sfte_win32_unload(app);
+        sfte_free(app->ctx);
+        SFTE_FREE(app);
+        return 1;
+    }
+
+    _sfte_win32_apply_dark_title(hwnd);
+    _sfte_win32_create_backbuffer(app);
+
+    _sfte_win32_pty_spawn(app);
+    if (!app->hpc) {
+        _sfte_win32_unload(app);
+        sfte_free(app->ctx);
+        SFTE_FREE(app);
+        return 1;
+    }
+    _sfte_win32_pty_update(app);
+
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    app->needs_render = 1;
+
+    _sfte_win32_loop(app);
+
+    _sfte_win32_unload(app);
+    sfte_free(app->ctx);
+    SFTE_FREE(app);
+    return 0;
+}
+#endif  // SFTE_WIN32
 #endif  // SFTE_IMPL
